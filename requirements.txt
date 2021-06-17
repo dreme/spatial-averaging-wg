@@ -1,5 +1,5 @@
-matplotlib==3.4.2
-numpy==1.20.3
-pandas==1.2.4
-nodejs==15.14.0
-ipympl==0.7.0
+matplotlib
+numpy
+pandas
+nodejs
+ipympl
