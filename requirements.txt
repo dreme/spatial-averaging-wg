@@ -2,8 +2,4 @@ matplotlib
 numpy
 pandas
 nodejs
-<<<<<<< HEAD
 ipympl
-=======
-ipympl
->>>>>>> b2b0e9b6dc4157682d4f722343daf053ab493885
