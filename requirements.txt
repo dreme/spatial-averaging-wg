@@ -4,3 +4,7 @@ pandas
 scipy
 nodejs
 ipympl
+ipywidgets
+mayavi
+seaborn
+tqdm 
