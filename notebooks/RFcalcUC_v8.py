@@ -22,7 +22,7 @@ Values for freq, power, grid & antennabox are entered as separate inputs when cr
 + Deleted the plotly exclusion zone function as it is way too slow compared to mayavi
 + Added 'spatialpeak' function to calculate spatial peak values from rolling maximum over vertical lines
 + Added functionality to 'ExclusionZone' for y=ycut cutplane of field points
-
++ Added capability to show SAR exclusion zones
 """
 __version_info__ = (0, 7)
 __version__ = '.'.join(map(str, __version_info__))
@@ -32,17 +32,35 @@ __author__ = 'Vitas Anderson'
 import pandas as pd
 import numpy as np
 import math
+from collections import namedtuple
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from mayavi import mlab
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy import interpolate
 
+def SARlimit(setting='pub'):
+    """This function returns the WBA SAR limit in W/kg
+    usage: Slimit(setting)
+    setting = lower tier (public/uncontrolled) or upper tier (occupational/controlled) setting
+    """
+    setdic = dict(pub='pub',
+                  occ='occ',
+                  unc='pub',
+                  con='occ')
+    setting = setdic[setting[:3].lower()]  # just use the first 3 letters to identify the setting type
+    assert setting in setdic.keys(), f"setting ({setting}) must start with one of {setdic.keys()}"
+    
+    limit = 0.08 if setting == 'pub' else 0.4
+    return limit
+
 def Slimit(freq, setting='pub', standard='RPS3'):
-    """This function returns the RPS3 or FCC limit for S in W/m²
-    usage: Slimit(f, setting)
-    setting denotes the lower tier (public/uncontrolled) or upper tier (occupational/controlled)
-    freq is the frequency in MHz (10 <= f <= 300,000)"""
+    """This function returns the compliance standard limit for S in W/m²
+    usage: Slimit(f, setting, standard)
+    INPUTS:
+      setting = lower tier (public/uncontrolled) or upper tier (occupational/controlled)
+         freq = exposure frequency in MHz (10 <= f <= 300,000)
+     standard = applicable compliance standard"""
 
     setdic = dict(pub='pub',
                   occ='occ',
@@ -623,13 +641,14 @@ class RFc:
         
         return C, limit
 
-    def ExclusionZone(self, data, power, color=('green','blue','orange','crimson'),
-                      alpha=(0.5)*4, setting=('public')*4, standard=('RPS3')*4, 
+    def ExclusionZone(self, data, power, 
+                      color=('green','blue','orange','crimson'),
+                      alpha=(0.5)*8, setting=('public')*8, standard=('RPS-S1')*8, 
                       title='', axv=(True,False,False), ycut=None, 
                       hman=None, xyzman=[-1.5,0,0], figsize=(1200,900)):
         '''
-        Draw Mayavi figures of S exclusion zones for up to 4 datasets
-             data = list of S data sets, e.g.['Smax','SE','SH]
+        Draw Mayavi figures of exclusion zones for datasets in S
+             data = list of S data sets, e.g.['Smax','SE','SH','SARwb']
             power = list of scaled power levels for data, e.g. [200,200,100]
             color = list of colours for exclusion zones for data, e.g. ['red','blue','crimson']
             alpha = opacity of the exclusion zone [0 to 1]
@@ -649,7 +668,8 @@ class RFc:
             if isinstance(arg, (str,float,int)):  # make sure that single string inputs are contained in a list
                 arg = [arg]
             if argname != 'data':
-                assert len(arg) >= len(data),f'{argname} must have at least as many elements as in data'
+                errmsg = f'{argname} must have at least as many elements as in data {data}'
+                assert len(arg) >= len(data), errmsg 
             return arg
 
         data = makeIterable(data,'data')
@@ -672,11 +692,24 @@ class RFc:
         if hman != None:
             assert 0.5 <= hman <= 3, f"hman ({hman}) must be between 0.5 and 3"
 
-        # Calculate the S limit and contour level of each exclusion zone
-        Slim = [Slimit(self.freq, s, std) for s, std in zip(setting, standard)]
-        contour = [self.power / p * Sl for p, Sl in zip(power, Slim)]
+        # Calculate the S and SAR limits
+        limits, limtexts = [], []
+        for dat, s, std in zip(data, setting, standard):
+            if 'SAR' in dat:
+                limit = SARlimit(s)
+                limtext = f'{limit} W/kg'
+                limits.append(limit)
+                limtexts.append(limtext)
+            else:
+                limit = Slimit(self.freq, s, std)
+                limtext = f'{limit:0.1f} W/m²'
+                limits.append(limit)
+                limtexts.append(limtext)
+    
+        # Calculate the contour level of each exclusion zone
+        contour = [self.power / p * lim for p, lim in zip(power, limits)]
         
-        # Calculate X, Y Z mgrid
+        # Calculate X, Y, Z mgrid
         X = self.xm
         Y = self.ym
         Z = self.zm
@@ -691,6 +724,7 @@ class RFc:
         # Calculate the x,y,z extents of the plot for all exclusion zones
         ScbAll = pd.DataFrame(columns=['x','y','z'])
         for dat, con in zip(data,contour):
+            print(f'{dat=}, {con=}')
             mask = (self.S[dat] >= con) & (self.S[dat] < 1.1*con)
             Scb = self.S.loc[mask,['x','y','z']]
             ScbAll = ScbAll.append(Scb)
@@ -702,9 +736,9 @@ class RFc:
 
         # draw the iso-surfaces
         titles = [] if title == '' else [title + '\n']
-        for dat,lim,p,col,a,s,std,con in zip(data,Slim,power,color,alpha,setting,standard,contour):
-            print(f'power = {self.power}, plotpower = {p}, setting = {s}, limit = {lim:0.1f}, contour level = {con:0.3f}')
-            t = f'{col.upper()}: {std} {s} exclusion zone ({lim:0.1f} W/m²) for {p} W {self.datatitles[dat]}'
+        for dat,limtext,p,col,a,s,std,con in zip(data,limtexts,power,color,alpha,setting,standard,contour):
+            print(f'power = {self.power}, plotpower = {p}, setting = {s}, limit = {limtext}, contour level = {con:0.3f}')
+            t = f'{col.upper()}: {std} {s} exclusion zone ({limtext}) for {p} W {self.datatitles[dat]}'
             titles.append(t)
             S = self.make_mgrid(dat)
             if ycut is not None:
