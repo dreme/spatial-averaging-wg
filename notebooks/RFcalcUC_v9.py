@@ -804,12 +804,14 @@ class RFc:
         mlab.title(title, height=0.85, size=0.1)
         mlab.show()
 
-    def showgrids(self, S=True, SAR=True, man=False, axv=(True,False,False) ):
+    def showgrids(self, S=True, SAR=True, hman=None, axv=(True,False,False) ):
         '''Show S and SAR grid points
         usage: .showgrids(S, SAR)
           S = flag to toggle S grid visibility (True/False)
         SAR = flag to toggle SAR grid visibility (True/False)
-        man = flag to toggle man figure
+        hman = height of body model behind antenna in m
+               If hman = None, then man model is not displayed
+        avx = X,Y,Z axis visibility flags (True/False,True/False,True/False)
         '''
 
         # create the Mayavi figure
@@ -854,9 +856,11 @@ class RFc:
             # draw the S grid points
             mlab.points3d(X2,Y2,Z2,scale_factor=0.04,color=(1,1,0),opacity=0.1)  # S grid
             
-        if man:
-            h = 1.57
-            mlabman(h, xc=-1, yc=0, zc=0)
+        if hman != None:
+            # draw man figure behind the antenna
+            assert type(hman) in (float, int), f'type of hman ({type(hman)}) must be int or float'
+            assert 0.1 <= hman <= 3, f'hman ({hman}) must be within range 0.1 to 3m'
+            mlabman(h=hman, xc=-1, yc=0, zc=0)
 
         # Add the antenna box
         mlabbox(self.xb, self.yb, self.zb)
