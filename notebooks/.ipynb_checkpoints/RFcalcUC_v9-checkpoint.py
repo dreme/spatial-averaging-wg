@@ -601,8 +601,10 @@ class RFc:
             f = self.sf('outant')
         if 'dB' in datatitle:
             unit = 'dB'
+        elif 'SAR' in datatitle:
+            unit = 'W/kg'
         else:
-            unit = 'W/m$^2$'
+            unit = r'W/m$^2$'
         Sh = self.S.loc[f.mask, data]
 
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -743,6 +745,7 @@ class RFc:
             S = self.make_mgrid(dat)
             if ycut is not None:
                 S = S[:,nc:,:]
+            S = np.nan_to_num(S, nan=0.0)  # replace nans in S with zeros
             src = mlab.pipeline.scalar_field(X, Y, Z, S, name=dat)
             mlab.pipeline.iso_surface(src, contours=[con, ], opacity=a,
                                       color=self.colors[col])
