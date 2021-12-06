@@ -23,6 +23,7 @@ Values for freq, power, grid & antennabox are entered as separate inputs when cr
 + Added 'spatialpeak' function to calculate spatial peak values from rolling maximum over vertical lines
 + Added functionality to 'ExclusionZone' for y=ycut cutplane of field points
 + Added capability to show SAR exclusion zones
++ Added check that contour level lies within range of S for ExclusionZone function
 """
 __version_info__ = (0, 9)
 __version__ = '.'.join(map(str, __version_info__))
@@ -582,7 +583,8 @@ class RFc:
         fig.suptitle(title, fontsize=14)
         plt.xlabel(axislabel[0] + ' (m)')
         plt.ylabel(axislabel[1] + ' (m)')
-        plt.show()
+        # plt.show()
+        return ax
 
     def hist(self, data, f=None, CI=95, bins=50, xrange=None):
         '''creates histogram of values in filtered S dataset
@@ -739,16 +741,17 @@ class RFc:
         # draw the iso-surfaces
         titles = [] if title == '' else [title + '\n']
         for dat,limtext,p,col,a,s,std,con in zip(data,limtexts,power,color,alpha,setting,standard,contour):
-            print(f'power = {self.power}, plotpower = {p}, setting = {s}, limit = {limtext}, contour level = {con:0.3f}')
+            print(f'power={self.power}, plotpower={p}, setting={s}, limit={limtext}, contour level={con:0.3f}')
             t = f'{col.upper()}: {std} {s} exclusion zone ({limtext}) for {p} W {self.datatitles[dat]}'
             titles.append(t)
             S = self.make_mgrid(dat)
             if ycut is not None:
                 S = S[:,nc:,:]
             S = np.nan_to_num(S, nan=0.0)  # replace nans in S with zeros
-            src = mlab.pipeline.scalar_field(X, Y, Z, S, name=dat)
-            mlab.pipeline.iso_surface(src, contours=[con, ], opacity=a,
-                                      color=self.colors[col])
+            if S.min() < con < S.max():    # check that con lies within range of values in S field
+                src = mlab.pipeline.scalar_field(X, Y, Z, S, name=dat)
+                mlab.pipeline.iso_surface(src, contours=[con, ], opacity=a,
+                                          color=self.colors[col])
 
         # draw the axes
         mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
