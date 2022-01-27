@@ -342,6 +342,7 @@ class RFc:
                        'pink': (1,0.75,0.8),
                        'brown': (0.35,0.24,0.12),
                        'olive': (0.29,0.33,0.13),
+                       'lightgrey': (0.8706, 0.8706, 0.8706)
                        }
 
     def make_mgrid(self, data):
@@ -645,7 +646,7 @@ class RFc:
         
         return C, limit
 
-    def ExclusionZone(self, data, power, 
+    def ExclusionZone(self, data, power, bg=None,
                       color=('green','blue','orange','crimson'),
                       alpha=(0.5)*8, setting=('public')*8, standard=('RPS-S1')*8, 
                       title='', axv=(True,False,False), ycut=None, 
@@ -695,6 +696,13 @@ class RFc:
             assert p >= 0, f"power ({p}) must be >= 0"
         if hman != None:
             assert 0.5 <= hman <= 3, f"hman ({hman}) must be between 0.5 and 3"
+            
+        # Background color
+        try:
+            bg = self.colors[bg]
+        except:
+            bg = None
+            print(f'{bg} background color has not been defined - using default grey')
 
         # Calculate the S and SAR limits
         limits, limtexts = [], []
@@ -735,7 +743,7 @@ class RFc:
         extent = ScbAll.apply([min,max]).T.values.flatten().round(1).tolist()
 
         # create the Mayavi figure
-        fig = mlab.figure(1, size=figsize, bgcolor=(0.5, 0.5, 0.5))
+        fig = mlab.figure(1, size=figsize, bgcolor=bg, fgcolor=self.colors['black'])
         mlab.clf()
 
         # draw the iso-surfaces
@@ -754,8 +762,13 @@ class RFc:
                                           color=self.colors[col])
 
         # draw the axes
-        mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
+        ax = mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
                   z_axis_visibility=axv[2], line_width=1, extent=extent)
+        ax.label_text_property.color = (0,0,0)
+        ax.title_text_property.color = (0,0,0)
+        ax.axes.label_format = '%g'
+        ax.axes.font_factor = 1
+
 
         # print plot title
         height, size = 0.08, 0.08
@@ -790,7 +803,11 @@ class RFc:
         # Get point data
         if f == None:
             f = self.sf('outant')
+            
         S = self.S[f.mask]
+        if 'SARwbi' in data:
+            SARmask = S.SARwbi.isna()
+            S = S[~SARmask]
         x, y, z = S.x.values, S.y.values, S.z.values
         s = S[data].values
 
@@ -803,7 +820,7 @@ class RFc:
 
         mlab.points3d(x, y, z, s, mask_points=mp, colormap='RdYlGn',
                            vmin=V[0], vmax=V[1], scale_mode='none', scale_factor=scale)
-        self.mlabbox(self.xb, self.yb, self.zb)
+        mlabbox(self.xb, self.yb, self.zb)
         mlab.colorbar(orientation='horizontal', nb_labels=nlabels, nb_colors=ncolors,
                       title=ctitle, label_fmt='%g')
         title = '{} \nfor {}'.format(self.datatitles[data], f.name)
@@ -822,7 +839,9 @@ class RFc:
 
         # create the Mayavi figure
         from mayavi import mlab
-        fig = mlab.figure(1, size=(1200,900), bgcolor=(0.3, 0.3, 0.3))
+        fig = mlab.figure(1, size=(1200,900), 
+                          bgcolor=self.colors['lightgrey'],
+                          fgcolor=self.colors['black'])
         mlab.clf()
 
         def make_mgrid(df):
@@ -861,6 +880,7 @@ class RFc:
                        
             # draw the S grid points
             mlab.points3d(X2,Y2,Z2,scale_factor=0.04,color=(1,1,0),opacity=0.1)  # S grid
+            a.label_text_property.color = (0,0,0)
             
         if hman != None:
             # draw man figure behind the antenna
@@ -872,11 +892,15 @@ class RFc:
         mlabbox(self.xb, self.yb, self.zb)
         
         # draw the axes
-        mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
-                  z_axis_visibility=axv[2], line_width=1,
-                  extent=extents)
+        ax = mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
+                       z_axis_visibility=axv[2], line_width=1,
+                       extent=extents,color=(0,0,0))
+        ax.label_text_property.color = (0,0,0)
+        ax.title_text_property.color = (0,0,0)
+        ax.axes.label_format = '%g'
+        ax.axes.font_factor = 1
         
         # Draw the scene
-        mlab.title(title, height=0.85, size=0.15, color=(1,1,1))
+        mlab.title(title, height=0.85, size=0.15, color=(0,0,0))
         fig.scene.parallel_projection = True
         mlab.show()
