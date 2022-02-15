@@ -24,6 +24,8 @@ Values for freq, power, grid & antennabox are entered as separate inputs when cr
 + Added functionality to 'ExclusionZone' for y=ycut cutplane of field points
 + Added capability to show SAR exclusion zones
 + Added check that contour level lies within range of S for ExclusionZone function
++ Replace mlabbox with panelAntenna function which draws the IEC 62232 panel antenna
++ Add the COLORS parameter to define all mayavi colors
 """
 __version_info__ = (0, 9)
 __version__ = '.'.join(map(str, __version_info__))
@@ -39,6 +41,26 @@ import matplotlib.pyplot as plt
 from mayavi import mlab
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy import interpolate
+
+COLORS = {'blue': (65/255., 105/255., 225/255.),
+          'darkblue': (0,0,0.55),
+          'green': (0, 1, 0),
+          'darkgreen': (0, 0.55, 0),
+          'red': (1, 0, 0),
+          'darkred': (0.55,0,0),
+          'coral2': (238/255,106/255,80/255),
+          'yellow': (1, 1, 0),
+          'gold': (1,215/255,0),
+          'black': (0, 0, 0),
+          'orange': (1, 140/255, 0),
+          'magenta': (1, 0, 1),
+          'white': (1,1,1),
+          'pink': (1,0.75,0.8),
+          'brown': (0.35,0.24,0.12),
+          'olive': (0.29,0.33,0.13),
+          'lightgrey': (0.8706, 0.8706, 0.8706),
+          'darkgrey': (0.1,0.1,0.1)
+          }
 
 def SARlimit(setting='pub'):
     """This function returns the WBA SAR limit in W/kg
@@ -182,6 +204,7 @@ def mlabbox(x, y, z):
     [xb, zb] = np.mgrid[x[0]:x[1]:2j, z[0]:z[1]:2j]
     [yc, zc] = np.mgrid[y[0]:y[1]:2j, z[0]:z[1]:2j]
     [f, f] = np.mgrid[0:0:2j, 0:0:2j]
+    print(f'{f=}, {xa=}, {ya=}, {xb=}, {zb=}, {yc=}, {zc=}')
 
     # Draw the six surfaces of the box
     surfaces = [[xa, ya, f + z[0], xa, ya, f + z[1]],
@@ -192,6 +215,55 @@ def mlabbox(x, y, z):
         mlab.mesh(s[0], s[1], s[2], opacity=1, color=darkblue)
         mlab.mesh(s[3], s[4], s[5], opacity=1, color=darkblue)
     return
+
+def panelAntenna(antcolor):
+    '''Function which returns a 3D box depiction of the IEC 62232
+       RBS panel antenna encompassing the reflector and antenna elements
+       Dipole centres are shown as red dots
+       The antenna phase centre is shown as a green dot'''
+    
+    # Coords of panel antenna phase centre (at centre of reflector panel)
+    x0, y0, z0 = -0.04, 0, 0
+    
+    # Antenna box lengths
+    xlength = 0.04
+    ylength = 0.3
+    zlength = 2.25
+    
+    # Antenna dipole centres
+    dz = 0.25
+    xd = [x0 + 0.04] * 9
+    yd = [y0] * 9
+    zd = [z0 + n*dz for n in [-4,-3,-2,-1,0,1,2,3,4]]
+    
+    # antenna box axis dimensions
+    x = [x0, x0 + xlength]
+    y = [y0-ylength/2, y0+ylength/2]
+    z = [z0-zlength/2, z0+zlength/2]    
+    
+    # create 2D mgrids for x,y,z and f (which is 0,0)
+    [xa, ya] = np.mgrid[x[0]:x[1]:2j, y[0]:y[1]:2j]
+    [xb, zb] = np.mgrid[x[0]:x[1]:2j, z[0]:z[1]:2j]
+    [yc, zc] = np.mgrid[y[0]:y[1]:2j, z[0]:z[1]:2j]
+    [f, f] = np.mgrid[0:0:2j, 0:0:2j]
+
+    # Draw the six surfaces of the box
+    surfaces = [[xa, ya, f + z[0], xa, ya, f + z[1]],
+                [xb, f + y[0], zb, xb, f + y[1], zb],
+                [f + x[0], yc, zc, f + x[1], yc, zc]]
+
+    for s in surfaces:
+        mlab.mesh(s[0], s[1], s[2], opacity=1, color=COLORS[antcolor])
+        mlab.mesh(s[3], s[4], s[5], opacity=1, color=COLORS[antcolor])
+    
+    # Draw the dipole centres
+    mlab.points3d(xd,yd,zd,scale_factor=0.03,color=COLORS['red'])
+    
+    # Draw the phase centre
+    mlab.points3d(x0,y0,z0,scale_factor=0.03,color=COLORS['green'])
+    
+    return
+
 
 def cylinder(xc,yc,z1,z2,rx,ry,color,n=30,cap1=True,cap2=True):
     '''Draw a capped eliptical cylinder oriented in z direction with Mayavi mlab
@@ -359,7 +431,9 @@ class RFc:
             Snames = store.get_storer('mydata').attrs.metadata
 
         # Add the S data to the self.S dataframe
+        display(Sdata.head())
         for col in Sdata:
+            print(f'{col = }')
             self.S[col] = Sdata[col]
 
         # Add the S data names to self.datatitles
@@ -775,7 +849,7 @@ class RFc:
         mlab.title('\n'.join(titles), height=height, size=size)
 
         # draw the antenna box
-        mlabbox(self.xb, self.yb, self.zb)
+        panelAntenna('darkblue')
         
         # draw the man figure
         if hman != None:
@@ -820,7 +894,7 @@ class RFc:
 
         mlab.points3d(x, y, z, s, mask_points=mp, colormap='RdYlGn',
                            vmin=V[0], vmax=V[1], scale_mode='none', scale_factor=scale)
-        mlabbox(self.xb, self.yb, self.zb)
+        panelAntenna('darkblue')
         mlab.colorbar(orientation='horizontal', nb_labels=nlabels, nb_colors=ncolors,
                       title=ctitle, label_fmt='%g')
         title = '{} \nfor {}'.format(self.datatitles[data], f.name)
@@ -880,7 +954,6 @@ class RFc:
                        
             # draw the S grid points
             mlab.points3d(X2,Y2,Z2,scale_factor=0.04,color=(1,1,0),opacity=0.1)  # S grid
-            a.label_text_property.color = (0,0,0)
             
         if hman != None:
             # draw man figure behind the antenna
@@ -889,7 +962,68 @@ class RFc:
             mlabman(h=hman, xc=-1, yc=0, zc=0)
 
         # Add the antenna box
-        mlabbox(self.xb, self.yb, self.zb)
+        panelAntenna('darkblue')
+        
+        # draw the axes
+        ax = mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
+                       z_axis_visibility=axv[2], line_width=1,
+                       extent=extents,color=(0,0,0))
+        ax.label_text_property.color = (0,0,0)
+        ax.title_text_property.color = (0,0,0)
+        ax.axes.label_format = '%g'
+        ax.axes.font_factor = 1
+        
+        # Draw the scene
+        mlab.title(title, height=0.85, size=0.15, color=(0,0,0))
+        fig.scene.parallel_projection = True
+        mlab.show()
+        
+    def show_grid_points(self, fields=['SARwb'], hman=None, axv=(True,False,False) ):
+        '''Show S and SAR grid points
+        usage: .showgrids(S, SAR)
+        fields = list of fields to display grid points for
+          hman = height of body model behind antenna in m
+                 If hman = None, then man model is not displayed
+           avx = X,Y,Z axis visibility flags (True/False,True/False,True/False)
+        '''
+        from mayavi import mlab
+        from collections.abc import Iterable
+        
+        # create the Mayavi figure
+        fig = mlab.figure(1, size=(1200,900), 
+                          bgcolor=self.colors['lightgrey'],
+                          fgcolor=self.colors['black'])
+        mlab.clf()
+
+        # Make sure that fields is iterable
+        if not isinstance(fields, Iterable): fields = [fields]
+               
+        # draw each of the field points
+        possible_fields = self.S[3:].columns.to_list()
+        for field in fields:
+            assert field in possible_fields, f'field ({field}) must be one of {possible_fields}'
+            # Get SAR grid point data
+            df = self.S[['x','y','z',field]].dropna()
+            
+            # draw the SAR grid popints            
+            mlab.points3d(df.x.values,df.y.values,df.z.values,
+                          scale_factor=0.1,color=(0,0,1),opacity=1)   # SAR grid
+            
+        # Get the extents
+        g = self.S[['x','y','z']].agg(['min','max']).T
+        extents = g.values.flatten().tolist()        
+                       
+        # draw man figure behind the antenna
+        if hman != None:
+            assert type(hman) in (float, int), f'type of hman ({type(hman)}) must be int or float'
+            assert 0.1 <= hman <= 3, f'hman ({hman}) must be within range 0.1 to 3m'
+            mlabman(h=hman, xc=-1, yc=0, zc=0)
+
+        # Add the antenna box
+        panelAntenna('darkblue')
+        
+        # Add title
+        title = 'grid points for: ' + ', '.join(fields)
         
         # draw the axes
         ax = mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
