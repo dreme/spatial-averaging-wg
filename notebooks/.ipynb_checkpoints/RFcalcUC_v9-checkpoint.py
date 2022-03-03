@@ -23,9 +23,11 @@ Values for freq, power, grid & antennabox are entered as separate inputs when cr
 + Added 'spatialpeak' function to calculate spatial peak values from rolling maximum over vertical lines
 + Added functionality to 'ExclusionZone' for y=ycut cutplane of field points
 + Added capability to show SAR exclusion zones
++ Added ycut and zcut features for ExclusionZone
 + Added check that contour level lies within range of S for ExclusionZone function
 + Replace mlabbox with panelAntenna function which draws the IEC 62232 panel antenna
 + Add the COLORS parameter to define all mayavi colors
++ Replaced 'RPS3' with 'RPS S-1 WB' as the default standard 
 """
 __version_info__ = (0, 9)
 __version__ = '.'.join(map(str, __version_info__))
@@ -77,7 +79,7 @@ def SARlimit(setting='pub'):
     limit = 0.08 if setting == 'pub' else 0.4
     return limit
 
-def Slimit(freq, setting='pub', standard='RPS3'):
+def Slimit(freq, setting='pub', standard='RPS S-1 WB'):
     """This function returns the compliance standard limit for S in W/m²
     usage: Slimit(f, setting, standard)
     INPUTS:
@@ -265,7 +267,7 @@ def panelAntenna(antcolor):
     return
 
 def show_grid_points(df, fields=['SARwb'], axv=(True,False,False), hman=None,
-                   bgcolor='lightgrey', fgcolor='black', antcolor='blue'):
+                   bgcolor='lightgrey', fgcolor='black', antcolor='blue',ycut=False):
     '''Show S and SAR grid points
     usage: .showgrids(S, SAR)
         df = dataframe
@@ -276,6 +278,7 @@ def show_grid_points(df, fields=['SARwb'], axv=(True,False,False), hman=None,
    bgcolor = background color
    fgcolor = foreground color
   antcolor = color of the MBS panel antenna       
+      ycut = True/False toggle to set y cut plane (i.e. remove points for y < 0)
     '''
     from mayavi import mlab
     from collections.abc import Iterable
@@ -296,16 +299,23 @@ def show_grid_points(df, fields=['SARwb'], axv=(True,False,False), hman=None,
 
         # Get field grid point data
         dfd = df[['x','y','z',field]].dropna()
+        
+        # Check for y cut plane
+        if ycut:
+            dfd = dfd[dfd.y >= 0]
 
         # draw the field grid points
         if 'SAR' in field:
             pointcolor = COLORS['coral2']
             opacity = 1
+            scale_factor = 0.1
         else:
             pointcolor = COLORS['blue']
             opacity = 0.4
+            scale_factor = 0.05
         mlab.points3d(dfd.x.values,dfd.y.values,dfd.z.values,
-                      scale_factor=0.1,color=pointcolor,opacity=opacity)   # SAR grid
+                      scale_factor=scale_factor,color=pointcolor,
+                      opacity=opacity)
 
     # draw the human figure        
     if hman != None:
@@ -529,8 +539,8 @@ class RFc:
         return x0, x1, y0, y1, z0, z1
 
     def sf(self, m, setting='pub', data='Smax', offset=None,
-           errtol=None, power=None, standard='RPS3'):
-        '''creates filter masks for S and err data
+           errtol=None, power=None, standard='RPS S-1 WB'):
+        '''creates filter masks for S data columns
         usage: .sf(m, setting, data, offset, errtol, power)
               m = string to indicate mask name or boolean expression
         setting = the upper or lower tier of the limit (e.g. 'pub', 'uncontrolled', 'occupational')
@@ -785,7 +795,7 @@ class RFc:
     def __repr__(self):
         return str(self)
 
-    def setcontour(self, setting, plotpower, standard='RPS3'):
+    def setcontour(self, setting, plotpower, standard='RPS S-1 WB'):
         '''Set the contour level for plot, scaled for plot power'''
         limit = Slimit(self.freq, setting, standard)
         C = self.power / plotpower * limit
@@ -797,7 +807,7 @@ class RFc:
     def ExclusionZone(self, data, power, bg='lightgrey', fg='black',
                       color=('green','blue','orange','crimson'),
                       alpha=(0.5)*8, setting=('public')*8, standard=('RPS-S1')*8, 
-                      title='', axv=(True,False,False), ycut=None, 
+                      title='', axv=(True,False,False), ycut=None, zcut=None,
                       hman=None, xyzman=[-1.5,0,0], figsize=(1200,900)):
         '''
         Draw Mayavi figures of exclusion zones for datasets in S
@@ -806,10 +816,11 @@ class RFc:
             color = list of colours for exclusion zones for data, e.g. ['red','blue','crimson']
             alpha = opacity of the exclusion zone [0 to 1]
           setting = list of settings for data, e.g. ['pub','occ']
-         standard = EME exposure standard for limit value ['RPS3','FCC']
+         standard = EME exposure standard for limit value ['RPS S-1 WB','FCC']
             title = displayed title for the plot
               axv = list or tuple indication visibility of x,y,z axes, e.g. (False,False,True) for just z axis visible
              ycut = y value to set cutplane where all points have y > ycut [ystart to yend]
+             zcut = z value to set cutplane where all points have z > zcut [zstart to zend]
              hman = height of man figure
            xyzman = [x,y,z] coords of centre of man
           figsize = tuple of width and height f figure in pixels, e.g. (1200,900)
@@ -873,6 +884,7 @@ class RFc:
         X = self.xm
         Y = self.ym
         Z = self.zm
+        
         if ycut is not None:
             ystart, yend, dy = self.grid['y']
             assert ystart < ycut < yend, f"ycut ({ycut} must lie within the grid's y value range [{ystart}, {yend}])"
@@ -881,6 +893,14 @@ class RFc:
             Y = Y[:,nc:,:]
             Z = Z[:,nc:,:]
             
+        if zcut is not None:
+            zstart, zend, dz = self.grid['z']
+            assert zstart < zcut < zend, f"zcut ({zcut} must lie within the grid's z value range [{zstart}, {zend}])"
+            nc = int((zcut - zstart) / dz)
+            X = X[:,:,nc:]
+            Y = Y[:,:,nc:]
+            Z = Z[:,:,nc:]
+
         # Calculate the x,y,z extents of the plot for all exclusion zones
         ScbAll = pd.DataFrame(columns=['x','y','z'])
         for dat, con in zip(data,contour):
@@ -903,6 +923,8 @@ class RFc:
             S = self.make_mgrid(dat)
             if ycut is not None:
                 S = S[:,nc:,:]
+            if zcut is not None:
+                S = S[:,:,nc:]
             S = np.nan_to_num(S, nan=0.0)  # replace nans in S with zeros
             if S.min() < con < S.max():    # check that con lies within range of values in S field
                 src = mlab.pipeline.scalar_field(X, Y, Z, S, name=dat)
@@ -935,7 +957,7 @@ class RFc:
         return
 
     def msp(self, data='errR', f=None, mp=2, V=[-4, 4],
-            nlabels=9, ncolors=8, ctitle=None, standard='RPS3'):
+            nlabels=9, ncolors=8, ctitle=None, standard='RPS S-1 WB'):
         '''Show data in 3D Mayavi scatter plot
         usage: .msp(data, f, mp, V, nlabels, ncolors, ctitle)\n
            data = S dataset column in the self.S dataframe
