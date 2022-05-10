@@ -274,7 +274,7 @@ def yagi(antcolor, origin=(0,0,0)):
        origin = tuple for XYZ coords of the centre of the rear reflector element'''
 
     # Yagi dimensions in m
-    radius = 0.0015    # radius of dipole wires
+    radius = 0.006    # radius of dipole wires
     l_element = 0.14   # element length
     l_reflector = 0.2  # reflector length
     l_dipole = 0.18    # length of folded dipole
