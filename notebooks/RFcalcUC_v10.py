@@ -955,7 +955,8 @@ class RFc:
             print(f'{dat=}, {con=}')
             mask = (self.S[dat] >= con) & (self.S[dat] < 1.1*con)
             Scb = self.S.loc[mask,['x','y','z']]
-            ScbAll = ScbAll.append(Scb)
+            # ScbAll = ScbAll.append(Scb)
+            ScbAll = pd.concat([ScbAll, Scb])
         extent = ScbAll.apply([min,max]).T.values.flatten().round(1).tolist()
 
         # create the Mayavi figure
