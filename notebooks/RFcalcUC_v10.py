@@ -268,8 +268,8 @@ def panelAntenna(antcolor, origin=(-0.04,0,0)):
     
     return
 
-def yagi(antcolor, origin=(0,0,0)):
-    '''Draw Yagi antenna
+def vyagi(antcolor, origin=(0,0,0)):
+    '''Draw vertical Yagi antenna
        color = color of antenna
        origin = tuple for XYZ coords of the centre of the rear reflector element'''
 
@@ -286,6 +286,7 @@ def yagi(antcolor, origin=(0,0,0)):
     # build yagi in Mayavi
     col = COLORS[antcolor]
     x0,y0,z0 = origin
+    
     # beam
     mlab.plot3d([x0,x0+l_beam],[0]*2, [0]*2,
                 color=col, tube_radius=radius)
@@ -314,7 +315,56 @@ def yagi(antcolor, origin=(0,0,0)):
     mlab.points3d(x0+loc_dipole,-w_dipole,0,color=(1,0,0),scale_factor=0.01)
     return
 
-def show_grid_points(df, fields=['SARwb'], axv=(True,False,False), hman=None,
+def hyagi(antcolor, origin=(0,0,0)):
+    '''Draw horizontal Yagi antenna
+       color = color of antenna
+       origin = tuple for XYZ coords of the centre of the rear reflector element'''
+
+    # Yagi dimensions in m
+    radius = 0.006    # radius of dipole wires
+    l_element = 0.14   # element length
+    l_reflector = 0.2  # reflector length
+    l_dipole = 0.18    # length of folded dipole
+    l_beam = 0.49      # length of central beam
+    w_dipole = 0.02    # width of folded dipole
+    loc_dipole = 0.10145   # location of dipole along beam
+    loc_elements = (0.16347, 0.27248, 0.37467, 0.47685)  # location of elements along beam
+    
+    # build yagi in Mayavi
+    col = COLORS[antcolor]
+    x0,y0,z0 = origin
+    
+    # beam
+    mlab.plot3d([x0,x0+l_beam],[0]*2, [0]*2,
+                color=col, tube_radius=radius)
+    # reflector
+    mlab.plot3d([x0]*2,[-l_reflector/2,l_reflector/2],[0]*2,
+                color=col, tube_radius=radius)
+    # elements
+    for loc in loc_elements:
+        mlab.plot3d([x0+loc]*2, [-l_element/2,l_element/2], [0]*2,
+                    color=col, tube_radius=radius)
+    # dipole
+    mlab.plot3d([x0+loc_dipole]*2,
+                [-(l_dipole-w_dipole)/2,(l_dipole-w_dipole)/2],
+                [0]*2,
+                color=col, tube_radius=radius)        
+    mlab.plot3d([x0+loc_dipole]*2, 
+                [-(l_dipole-w_dipole)/2,(l_dipole-w_dipole)/2],
+                [-w_dipole]*2,
+                color=col, tube_radius=radius)
+    mlab.plot3d([x0+loc_dipole]*3,
+                [(l_dipole-w_dipole)/2,l_dipole/2,(l_dipole-w_dipole)/2],
+                [0,-w_dipole/2,-w_dipole],
+                color=col, tube_radius=radius)        
+    mlab.plot3d([x0+loc_dipole]*3,
+                [-(l_dipole-w_dipole)/2,-l_dipole/2,-(l_dipole-w_dipole)/2],
+                [0,-w_dipole/2,-w_dipole],
+                color=col, tube_radius=radius)        
+    mlab.points3d(x0+loc_dipole,0,-w_dipole,color=(1,0,0),scale_factor=0.01)
+    return
+
+def show_grid_points(df, fields=['SARwb'], axv=(True,False,False), hman=None, antenna=hyagi,
                    bgcolor='lightgrey', fgcolor='black', antcolor='blue',ycut=False):
     '''Show S and SAR grid points
     usage: .showgrids(S, SAR)
@@ -331,19 +381,22 @@ def show_grid_points(df, fields=['SARwb'], axv=(True,False,False), hman=None,
     from mayavi import mlab
     from collections.abc import Iterable
     
+    # Make sure that fields is iterable
+    if not isinstance(fields, Iterable): fields = [fields]
+
+    # check that fields is a valid selection
+    possible_fields = df[3:].columns.to_list()
+    for field in fields:
+        assert field in possible_fields, f'field ({field}) must be one of {possible_fields}'
+    
     # create the Mayavi figure
     fig = mlab.figure(1, size=(1200,900), 
                       bgcolor=COLORS[bgcolor],
                       fgcolor=COLORS[fgcolor])
     mlab.clf()
 
-    # Make sure that fields is iterable
-    if not isinstance(fields, Iterable): fields = [fields]
-
     # draw each of the field points
-    possible_fields = df[3:].columns.to_list()
     for field in fields:
-        assert field in possible_fields, f'field ({field}) must be one of {possible_fields}'
 
         # Get field grid point data
         dfd = df[['x','y','z',field]].dropna()
@@ -389,7 +442,7 @@ def show_grid_points(df, fields=['SARwb'], axv=(True,False,False), hman=None,
     ax.axes.font_factor = 1
 
     # Draw the panel antenna
-    panelAntenna(antcolor)
+    antenna(antcolor)
     
     # Draw the scene
     mlab.title(title, height=0.85, size=0.15, color=COLORS[fgcolor])
@@ -856,7 +909,7 @@ class RFc:
                       color=('green','blue','orange','crimson'),
                       alpha=(0.5)*8, setting=('public')*8, standard=('RPS-S1')*8, 
                       title='', axv=(True,False,False), ycut=None, zcut=None,
-                      hman=None, xyzman=[-1.5,0,0], figsize=(1200,900)):
+                      hman=None, xyzman=[-1.5,0,0], antenna=hyagi,figsize=(1200,900)):
         '''
         Draw Mayavi figures of exclusion zones for datasets in S
              data = list of S data sets, e.g.['Smax','SE','SH','SARwb']
@@ -871,6 +924,7 @@ class RFc:
              zcut = z value to set cutplane where all points have z > zcut [zstart to zend]
              hman = height of man figure
            xyzman = [x,y,z] coords of centre of man
+          antenna = function for dispay of antenna
           figsize = tuple of width and height f figure in pixels, e.g. (1200,900)
         '''
 
@@ -993,8 +1047,7 @@ class RFc:
         mlab.title('\n'.join(titles), height=height, size=size)
 
         # draw the antenna
-        panelAntenna('darkblue')
-        yagi('yellow')
+        antenna('blue')
         
         # draw the man figure
         if hman != None:
@@ -1046,13 +1099,14 @@ class RFc:
         mlab.title(title, height=0.85, size=0.1)
         mlab.show()
 
-    def showgrids(self, S=True, SAR=True, hman=None, axv=(True,False,False) ):
-        '''Show S and SAR grid points
+    def showgrids(self, S=True, SAR=True, hman=None, antenna=hyagi, axv=(True,False,False) ):
+        '''Show S and SAR grid points in 3D Mayavi scatter plot
         usage: .showgrids(S, SAR)
           S = flag to toggle S grid visibility (True/False)
         SAR = flag to toggle SAR grid visibility (True/False)
         hman = height of body model behind antenna in m
                If hman = None, then man model is not displayed
+     antenna = function for dsiplaying the antenna
         avx = X,Y,Z axis visibility flags (True/False,True/False,True/False)
         '''
 
@@ -1107,7 +1161,7 @@ class RFc:
             mlabman(h=hman, xc=-1, yc=0, zc=0)
 
         # Add the antenna box
-        panelAntenna('darkblue')
+        antenna('darkblue')
         
         # draw the axes
         ax = mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
