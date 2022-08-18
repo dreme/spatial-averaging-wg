@@ -27,7 +27,9 @@ Values for freq, power, grid & antennabox are entered as separate inputs when cr
 + Added check that contour level lies within range of S for ExclusionZone function
 + Replace mlabbox with panelAntenna function which draws the IEC 62232 panel antenna
 + Add the COLORS parameter to define all mayavi colors
-+ Replaced 'RPS3' with 'RPS S-1 WB' as the default standard 
++ Replaced 'RPS3' with 'RPS S-1 WB' as the default standard
++ Add a filter option for valid spatial averaging points
++ Add assertion tests for RFc parameters
 """
 __version_info__ = (0, 9)
 __version__ = '.'.join(map(str, __version_info__))
@@ -37,6 +39,7 @@ __author__ = 'Vitas Anderson'
 import pandas as pd
 import numpy as np
 import math
+import numbers
 from collections import namedtuple
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -44,6 +47,7 @@ from mayavi import mlab
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy import interpolate
 
+# Create dictionary of Mayavi color coordinates
 COLORS = {'blue': (65/255., 105/255., 225/255.),
           'darkblue': (0,0,0.55),
           'green': (0, 1, 0),
@@ -61,6 +65,7 @@ COLORS = {'blue': (65/255., 105/255., 225/255.),
           'brown': (0.35,0.24,0.12),
           'olive': (0.29,0.33,0.13),
           'lightgrey': (0.8706, 0.8706, 0.8706),
+          'lightgrey2':(0.34,0,34,0,34),
           'darkgrey': (0.1,0.1,0.1)
           }
 
@@ -364,8 +369,8 @@ def hyagi(antcolor, origin=(0,0,0)):
     mlab.points3d(x0+loc_dipole,0,-w_dipole,color=(1,0,0),scale_factor=0.01)
     return
 
-def show_grid_points(df, fields=['SARwb'], axv=(True,False,False), hman=None, antenna=hyagi,
-                   bgcolor='lightgrey', fgcolor='black', antcolor='blue',ycut=False):
+def show_grid_points(df, fields=['SARwb'],axv=(True,False,False),hman=None,antenna=hyagi,
+                   bgcolor='lightgrey',fgcolor='black',antcolor='blue',ycut=False,title=None):
     '''Show S and SAR grid points
     usage: .showgrids(S, SAR)
         df = dataframe
@@ -412,8 +417,8 @@ def show_grid_points(df, fields=['SARwb'], axv=(True,False,False), hman=None, an
             scale_factor = 0.1
         else:
             pointcolor = COLORS['blue']
-            opacity = 0.4
-            scale_factor = 0.05
+            opacity = 0.3
+            scale_factor = 0.04
         mlab.points3d(dfd.x.values,dfd.y.values,dfd.z.values,
                       scale_factor=scale_factor,color=pointcolor,
                       opacity=opacity)
@@ -429,8 +434,9 @@ def show_grid_points(df, fields=['SARwb'], axv=(True,False,False), hman=None, an
     g = df[['x','y','z']].agg(['min','max']).T
     extents = g.values.flatten().tolist()        
 
-    # Add title
-    title = 'grid points for: ' + ', '.join(fields)
+    # Set title
+    if title == None:
+        title = 'grid points for: ' + ', '.join(fields)
 
     # draw the axes
     ax = mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
@@ -541,7 +547,7 @@ class RFc:
     '''Creates an object which facilitates quantification and viewing of RF calculation
     uncertainty error in S field outputs from FACs compared to FEKO'''
 
-    def __init__(self, freq, power, grid, antbox, errtol=0.15, offset=0.01):
+    def __init__(self, freq, power, grid, antbox, errtol=0.15, offset=0):
         '''
         freq is the RF frequency of the model data in MHz
         power is the nominal power of the source for the simulations
@@ -550,6 +556,18 @@ class RFc:
         errtol is the default error tolerance in S for picking points near the compliance limit
         offset specifies a distance away from the antenna box when selecting points outside it
         '''
+        
+        # Assertion tests
+        assert isinstance(freq,numbers.Number), f'freq ({freq}) must be a number'
+        assert isinstance(power,numbers.Number), f'power ({power}) must be a number'
+        assert isinstance(errtol,numbers.Number), f'errtol ({errtol}) must be a number'
+        assert isinstance(offset,numbers.Number), f'offset ({offset}) must be a number'
+        assert freq >= 100, f'freq ({freq}) must be >= 100 MHz'
+        assert power > 0, f'power ({power}) must be > 0 W'
+        assert errtol >= 0, f'errtol ({errtol}) must be >= 0'
+        assert offset >= 0, f'offset ({offset}) must be >= 0 m'
+        
+        # Assign self properties
         self.freq = freq
         self.power = power
         self.grid = grid
@@ -584,22 +602,6 @@ class RFc:
         self.xm = self.make_mgrid('x')
         self.ym = self.make_mgrid('y')
         self.zm = self.make_mgrid('z')
-
-        # Create dictionary of RGB color tuples for mayavi plots
-        self.colors = {'blue': (65 / 255., 105 / 255., 225 / 255.),
-                       'green': (65 / 255., 255 / 255., 105 / 255.),
-                       'red': (1, 0, 0),
-                       'yellow': (1, 1, 0),
-                       'black': (0, 0, 0),
-                       'gold': (1, 215 / 255, 0),
-                       'orange': (1, 140 / 255, 0),
-                       'magenta': (1, 0, 1),
-                       'white': (1,1,1),
-                       'pink': (1,0.75,0.8),
-                       'brown': (0.35,0.24,0.12),
-                       'olive': (0.29,0.33,0.13),
-                       'lightgrey': (0.8706, 0.8706, 0.8706)
-                       }
 
     def make_mgrid(self, data):
         '''Creates an mgrid from a column in self.S'''
@@ -646,7 +648,8 @@ class RFc:
               m = string to indicate mask name or boolean expression
         setting = the upper or lower tier of the limit (e.g. 'pub', 'uncontrolled', 'occupational')
            data = S dataset in S (e.g. Sixus, SE, SH, Smax)
-         offset = dimensional offset in metres for enlarging the antenna box
+         offset = dimensional offset in metres for enlarging the antenna box or 
+                  the additional z direction offset from the antenna box for the nobody volume
          errtol = error tolerance for selecting points near compliance boundary
           power = adjusted power of antenna (the limit value is scaled by self.power/power)'''
 
@@ -656,9 +659,11 @@ class RFc:
         if power == None: power = self.power
 
         Slim = Slimit(self.freq, setting, standard) * self.power / power
+        
         x0, x1, y0, y1, z0, z1 = self.antboxsize(offset)
-        mask_outant = (S.x < x0) | (S.x > x1) | (S.y < y0) | \
-                      (S.y > y1) | (S.z < z0) | (S.z > z1)
+        mask_outant = (S.x < x0) | (S.x > x1) | \
+                      (S.y < y0) | (S.y > y1) | \
+                      (S.z < z0) | (S.z > z1)
 
         if m == 'all':
             mask = np.full(len(S), True, dtype=bool)
@@ -666,9 +671,15 @@ class RFc:
         elif m == 'outant':
             mask = mask_outant
             name = 'points outside antenna box'
+        elif m == 'spatavg':
+            x0, x1, y0, y1, z0, z1 = self.antboxsize(offset=0)
+            mask = (S.x < x0) | (S.x > x1) | \
+                   (S.y < y0) | (S.y > y1) | \
+                   (S.z <= z0-offset/2) | (S.z >= z1+offset/2)
+            name = f'valid points for {offset}m spatial averaging and SAR'            
         elif m == 'ant':
             mask = np.invert(mask_outant)
-            name = 'points inside antenna box'
+            name = 'points inside and on antenna box'
         else:
             if m in ['cb', 'icb']:
                 if m == 'cb':
@@ -909,7 +920,7 @@ class RFc:
                       color=('green','blue','orange','crimson'),
                       alpha=(0.5)*8, setting=('public')*8, standard=('RPS-S1')*8, 
                       title='', axv=(True,False,False), ycut=None, zcut=None,
-                      hman=None, xyzman=[-1.5,0,0], antenna=hyagi,figsize=(1200,900)):
+                      hman=None, xyzman=[-1.5,0,0], antenna=panelAntenna,figsize=(1200,900)):
         '''
         Draw Mayavi figures of exclusion zones for datasets in S
              data = list of S data sets, e.g.['Smax','SE','SH','SARwb']
@@ -950,7 +961,7 @@ class RFc:
         for d in data:
             assert d in Scols, f"data ({d}) must be one of {Scols}"
         for c in color:
-            assert c in self.colors.keys(), f"color ({c}) must be in {list(self.colors.keys())}"
+            assert c in COLORS.keys(), f"color ({c}) must be in {list(COLORS.keys())}"
         for a in alpha:
             assert (a >= 0) and (a <= 1), f"alpha ({a}) must be in [0,1] range."
         for p in power:
@@ -1032,7 +1043,7 @@ class RFc:
             if S.min() < con < S.max():    # check that con lies within range of values in S field
                 src = mlab.pipeline.scalar_field(X, Y, Z, S, name=dat)
                 mlab.pipeline.iso_surface(src, contours=[con, ], opacity=a,
-                                          color=self.colors[col])
+                                          color=COLORS[col])
 
         # draw the axes
         ax = mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
@@ -1113,8 +1124,8 @@ class RFc:
         # create the Mayavi figure
         from mayavi import mlab
         fig = mlab.figure(1, size=(1200,900), 
-                          bgcolor=self.colors['lightgrey'],
-                          fgcolor=self.colors['black'])
+                          bgcolor=COLORS['lightgrey'],
+                          fgcolor=sCOLORS['black'])
         mlab.clf()
 
         def make_mgrid(df):
@@ -1176,3 +1187,176 @@ class RFc:
         mlab.title(title, height=0.85, size=0.15, color=(0,0,0))
         fig.scene.parallel_projection = True
         mlab.show()
+
+    def AnimatedExclusionZone(self, data, power, bg='white', fg='black',
+                              color=('green','blue','orange','crimson'),
+                              alpha=(0.5)*8, setting=('public')*8, standard=('RPS-S1')*8, 
+                              title='', axv=(True,False,False), ycut=None, zcut=None, 
+                              daz=1, elevation =90, distance=None, showtitle=True,
+                              hman=None, xyzman=[-1.5,0,0], antenna=hyagi, figsize=(1200,900)):
+        '''
+        Draw Mayavi figures of exclusion zones for datasets in S
+             data = list of S data sets, e.g.['Smax','SE','SH','SARwb']
+            power = list of scaled power levels for data, e.g. [200,200,100]
+            color = list of colours for exclusion zones for data, e.g. ['red','blue','crimson']
+            alpha = opacity of the exclusion zone [0 to 1]
+          setting = list of settings for data, e.g. ['pub','occ']
+         standard = EME exposure standard for limit value ['RPS S-1 WB','FCC']
+            title = displayed title for the plot
+              axv = list or tuple indication visibility of x,y,z axes, e.g. (False,False,True) for just z axis visible
+             ycut = y value to set cutplane where all points have y > ycut [ystart to yend]
+             zcut = z value to set cutplane where all points have z > zcut [zstart to zend]
+              daz = azimuthal increment for animation
+        elevation = elevation angle of view
+         distance = distance of camera from scene
+             hman = height of man figure
+           xyzman = [x,y,z] coords of centre of man
+          antenna = function for dispay of antenna
+          figsize = tuple of width and height f figure in pixels, e.g. (1200,900)
+        '''
+
+        # make sure that data, power, color, setting, standard are lists or tuples
+        # and have at least as many elements as in data
+        def makeIterable(arg, argname):
+            if isinstance(arg, (str,float,int)):  # make sure that single string inputs are contained in a list
+                arg = [arg]
+            if argname != 'data':
+                errmsg = f'{argname} must have at least as many elements as in data {data}'
+                assert len(arg) >= len(data), errmsg 
+            return arg
+
+        data = makeIterable(data,'data')
+        power = makeIterable(power,'power')
+        color = makeIterable(color,'color')
+        alpha = makeIterable(alpha,'alpha')
+        setting = makeIterable(setting,'setting')
+        standard = makeIterable(standard,'standard')
+
+        # assertion tests
+        Scols = self.S.columns[5:].tolist()  # i.e. all columns except the x y z r phi coordinates
+        for d in data:
+            assert d in Scols, f"data ({d}) must be one of {Scols}"
+        for c in color:
+            assert c in COLORS.keys(), f"color ({c}) must be in {list(COLORS.keys())}"
+        for a in alpha:
+            assert (a >= 0) and (a <= 1), f"alpha ({a}) must be in [0,1] range."
+        for p in power:
+            assert p >= 0, f"power ({p}) must be >= 0"
+        if hman != None:
+            assert 0.5 <= hman <= 3, f"hman ({hman}) must be between 0.5 and 3"
+        assert bg in COLORS.keys(), f"bg {bg} must be one of {COLORS.keys()}"
+        assert fg in COLORS.keys(), f"fg {fg} must be one of {COLORS.keys()}"
+        
+            
+        # Background and foreground colors
+        bgc = COLORS[bg]
+        fgc = COLORS[fg]
+
+        # Calculate the S and SAR limits
+        limits, limtexts = [], []
+        for dat, s, std in zip(data, setting, standard):
+            if 'SAR' in dat:
+                limit = SARlimit(s)
+                limtext = f'{limit} W/kg'
+                limits.append(limit)
+                limtexts.append(limtext)
+            else:
+                limit = Slimit(self.freq, s, std)
+                limtext = f'{limit:0.1f} W/m²'
+                limits.append(limit)
+                limtexts.append(limtext)
+    
+        # Calculate the contour level of each exclusion zone
+        contour = [self.power / p * lim for p, lim in zip(power, limits)]
+        
+        # Calculate X, Y, Z mgrid
+        X = self.xm
+        Y = self.ym
+        Z = self.zm
+        
+        if ycut is not None:
+            ystart, yend, dy = self.grid['y']
+            assert ystart < ycut < yend, f"ycut ({ycut} must lie within the grid's y value range [{ystart}, {yend}])"
+            nc = int((ycut - ystart) / dy)
+            X = X[:,nc:,:]
+            Y = Y[:,nc:,:]
+            Z = Z[:,nc:,:]
+            
+        if zcut is not None:
+            zstart, zend, dz = self.grid['z']
+            assert zstart < zcut < zend, f"zcut ({zcut} must lie within the grid's z value range [{zstart}, {zend}])"
+            nc = int((zcut - zstart) / dz)
+            X = X[:,:,nc:]
+            Y = Y[:,:,nc:]
+            Z = Z[:,:,nc:]
+
+        # Calculate the x,y,z extents of the plot for all exclusion zones
+        ScbAll = pd.DataFrame(columns=['x','y','z'])
+        for dat, con in zip(data,contour):
+            print(f'{dat=}, {con=}')
+            mask = (self.S[dat] >= con) & (self.S[dat] < 1.1*con)
+            Scb = self.S.loc[mask,['x','y','z']]
+            # ScbAll = ScbAll.append(Scb)
+            ScbAll = pd.concat([ScbAll, Scb])
+        extent = ScbAll.apply([min,max]).T.values.flatten().round(1).tolist()
+
+        # mayavi animation function
+        @mlab.animate(delay = 50)
+        def updateAnimation():
+            az = 0.0
+            while True:
+                mlab.view(azimuth=az, elevation=elevation,distance=distance)
+                az += 1
+                yield
+        
+        # create the Mayavi figure
+        fig = mlab.figure(1, size=figsize, bgcolor=bgc, fgcolor=fgc)
+        mlab.clf()
+
+        # draw the iso-surfaces
+        titles = [] if title == '' else [title + '\n']
+        for dat,limtext,p,col,a,s,std,con in zip(data,limtexts,power,color,alpha,setting,standard,contour):
+            print(f'power={self.power}, plotpower={p}, setting={s}, limit={limtext}, contour level={con:0.3f}')
+            t = f'{col.upper()}: {std} {s} exclusion zone ({limtext}) for {p} W {self.datatitles[dat]}'
+            titles.append(t)
+            S = self.make_mgrid(dat)
+            if ycut is not None:
+                S = S[:,nc:,:]
+            if zcut is not None:
+                S = S[:,:,nc:]
+            S = np.nan_to_num(S, nan=0.0)  # replace nans in S with zeros
+            if S.min() < con < S.max():    # check that con lies within range of values in S field
+                src = mlab.pipeline.scalar_field(X, Y, Z, S, name=dat)
+                mlab.pipeline.iso_surface(src, contours=[con, ], opacity=a,
+                                          color=COLORS[col])
+
+        # draw the axes
+        ax = mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
+                  z_axis_visibility=axv[2], line_width=1, extent=extent)
+        ax.label_text_property.color = fgc
+        ax.title_text_property.color = fgc
+        ax.axes.label_format = '%g'
+        ax.axes.font_factor = 1
+
+        # print plot title
+        if showtitle == True:
+            height, size = 0.08, 0.08
+            mlab.title('\n'.join(titles), height=height, size=size)
+
+        # draw the antenna
+        antenna('blue')
+        
+        # draw the man figure
+        if hman != None:
+            xc, yc, zc = xyzman
+            mlabman(hman, xc, yc, zc)
+
+        # Set prallel projection
+        fig.scene.parallel_projection = True
+        
+        # Start animation
+        updateAnimation()        
+        mlab.show()
+        
+        return
+
