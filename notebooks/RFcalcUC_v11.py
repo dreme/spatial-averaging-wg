@@ -30,7 +30,9 @@ Values for freq, power, grid & antennabox are entered as separate inputs when cr
 + Replaced 'RPS3' with 'RPS S-1 WB' as the default standard
 + Add a filter option for valid spatial averaging points
 + Add assertion tests for RFc parameters
-+ Tidy up sf filter code and add spat_avg_outant option 
++ Tidy up sf filter code and add spat_avg_outant option
++ Placed mayavi calls inside try/except blocks
++ Added function for calculating WBA SAR using IEC 62232 formula
 """
 __version_info__ = (0, 9)
 __version__ = '.'.join(map(str, __version_info__))
@@ -143,6 +145,101 @@ def Slimit(freq, setting='pub', standard='RPS S-1 WB'):
 
     return S
 
+def SAR_IEC_front(d,body,fMHz,P,N,DdBi,L,Φdeg,Θdeg):
+    '''This function calculates upper bound estimates of local 1g, 10g and whole body average
+       SAR induced by exposure in front of a directional (vertical or cross polarized) or
+       omni antenna for frequencies 300 to 5000 MHz in accordance with the SAR formulas
+       in section B.4.2.2 in the IEC 62232 (2018) standard.
+       The driven elements of the antenna must lie on the same vertical axis so it is generally
+       only suitable for MBS omni and panel antennas
+       
+       Inputs:
+          d = closest distance between the outermost point of the antenna and 
+              a box enclosing the body
+       body = body type for SAR calculations ("adult" or "child")
+       fMHz = frequency of the exposure (MHz)
+          P = radiated power of the antenna in (W)
+          N = Number of driven elements
+       DdBi = peak directivity of the antenna (dBi)
+          L = overall height of the antenna (m)
+       Φdeg = horizontal half-power beamwidth (degrees) of the antenna
+       Θdeg = vertical half-power beam width (degrees) of the antenna
+       
+       Outputs:
+         SARwb, SAR10g, SAR1g (W/kg)       
+    '''
+    
+    # Constants
+    π = math.pi
+    nan = math.nan  # nan = not a number
+    λ = 300 / fMHz
+    
+    # check inputs
+    assert 300 <= fMHz <= 5000, f'fMHz ({fMHz} MHz) must lie within range 300 to 5000 MHz'
+    assert body in ['adult','child'], f'body ({body}) must be either "adult" or "child"'
+    assert 0.1 < L < 10, f'value for L ({L} m) does not look right'
+    assert 1 <= N <= 15, f'value for N ({N}) does not look right'
+    assert 10 < Φdeg <= 360, f'Φdeg ({Φdeg}°) should lie within range 10 to 360 degrees'
+    assert 4 < Θdeg <= 180, f'Θdeg ({Φdeg}°) should lie within range 4 to 180 degrees'
+        
+    # Convert DdBi to linear gain
+    D = 10**(DdBi/10) # linear
+
+    # convert Φdeg and Θdeg to radians
+    Φ = Φdeg * π / 180
+    Θ = Θdeg * π / 180
+    
+    # calculate Hbeam
+    Hbeam = 2 * d * math.tan(Θ/2)
+    
+    # Set A and B
+    A, B = (0.089, 1.54) if body.lower() == 'adult' else (0.06, 0.96)
+    
+    # Calculate Rwb10g, Rwb1g
+    Rwb10g, Rwb1g = (1.5,0.6) if fMHz <= 2500 else (1,0.3)
+        
+    # calculate Heff
+    if L >= B:
+        Heff = B
+    else:
+        if Hbeam < L and Hbeam < B:
+            Heff = L
+        elif L <= Hbeam < B:
+            Heff = Hbeam
+        elif Hbeam >= B:
+            Heff = B
+
+    # Calculate C(f)
+    dmm = d * 1000  # convert d from m to mm
+    if fMHz <= 900:
+        if dmm < 200:
+            C = nan
+        elif dmm <= 400:
+            C = (3.5 + (fMHz-300)/600 ) * (1 + 0.8*dmm/400)
+        else:
+            C = 6.3 + (fMHz-300)/600 * 1.8
+    else:
+        if dmm <= 400:
+            C = 4.5 * (1 + 0.8*dmm/400)
+        else:
+            C = 8.1
+    C = C * 1E-4
+    
+    # Calculate whole body average SAR
+    if d > λ/(2*π):
+        SARwb  = C*Heff*P / (A*B*Φ*L*d) * (1 + ((4*π*d) / (Φ*D*L))**2)**-0.5
+    else:
+        SARwb = nan
+        
+    # Calculate 10g, 1g localised SAR
+    if d >= 0.2:
+        SAR10g = 25 * SARwb * B / (Heff * Rwb10g)
+        SAR1g  = 20 * SARwb * B / (Heff * Rwb1g)
+    else:
+        SAR10g, SAR1g = nan, nan
+        
+    return SARwb, SAR10g, SAR1g
+
 def cint(x):
     '''Returns the nearest integer of x'''
     return int(round(x))
@@ -224,16 +321,13 @@ def mlabbox(x, y, z):
         mlab.mesh(s[3], s[4], s[5], opacity=1, color=darkblue)
     return
 
-def panelAntenna(antcolor, origin=(-0.04,0,0)):
+def panelAntenna(antcolor, x0=-0.04, y0=0, z0=0):
     '''Function which returns a 3D box depiction of the IEC 62232
        RBS panel antenna encompassing the reflector and antenna elements
        Dipole centres are shown as red dots
        The antenna phase centre is shown as a green dot
        antcolor = color of the antenna
-       origin = location of the centre of the reflector'''
-    
-    # Coords of panel antenna phase centre (at centre of reflector panel)
-    x0, y0, z0 = origin
+       x0,y0,z0 = location of the centre of the reflector'''
     
     # Antenna box lengths
     xlength = 0.04
@@ -274,10 +368,10 @@ def panelAntenna(antcolor, origin=(-0.04,0,0)):
     
     return
 
-def vyagi(antcolor, origin=(0,0,0)):
+def vyagi(antcolor, x0=0, y0=0, z0=0):
     '''Draw vertical Yagi antenna
        color = color of antenna
-       origin = tuple for XYZ coords of the centre of the rear reflector element'''
+       x0,y0,z0 = coords of the centre of the rear reflector element'''
 
     # Yagi dimensions in m
     radius = 0.006    # radius of dipole wires
@@ -291,7 +385,6 @@ def vyagi(antcolor, origin=(0,0,0)):
     
     # build yagi in Mayavi
     col = COLORS[antcolor]
-    x0,y0,z0 = origin
     
     # beam
     mlab.plot3d([x0,x0+l_beam],[0]*2, [0]*2,
@@ -321,10 +414,10 @@ def vyagi(antcolor, origin=(0,0,0)):
     mlab.points3d(x0+loc_dipole,-w_dipole,0,color=(1,0,0),scale_factor=0.01)
     return
 
-def hyagi(antcolor, origin=(0,0,0)):
+def hyagi(antcolor, x0=0, y0=0, z0=0):
     '''Draw horizontal Yagi antenna
        color = color of antenna
-       origin = tuple for XYZ coords of the centre of the rear reflector element'''
+       x0,y0,z0 = coords of the centre of the rear reflector element'''
 
     # Yagi dimensions in m
     radius = 0.006    # radius of dipole wires
@@ -339,7 +432,6 @@ def hyagi(antcolor, origin=(0,0,0)):
     
     # build yagi in Mayavi
     col = COLORS[antcolor]
-    x0,y0,z0 = origin
     
     # beam
     mlab.plot3d([x0,x0+l_beam],[0]*2, [0]*2,
@@ -976,14 +1068,18 @@ class RFc:
         return C, limit
 
     def ExclusionZone(self, data, power, bg='lightgrey', fg='black',
-                      color=('green','blue','orange','crimson'),
-                      alpha=(0.5)*8, setting=('public')*8, standard=('RPS-S1')*8, 
-                      title='', axv=(True,False,False), ycut=None, zcut=None,
-                      hman=None, xyzman=[-1.5,0,0], antenna=panelAntenna, figsize=(1200,900)):
+                      color=['green','blue','orange','magenta'],
+                      alpha=[0.5]*8, setting=['public']*8, standard=['RPS-S1']*8, 
+                      title='', axv=[True,False,False], ycut=None, zcut=None,
+                      hman=None, xyzman=[-1.5,0,0], 
+                      antenna=panelAntenna, antdz=None,
+                      figsize=(1200,900)):
         '''
         Draw Mayavi figures of exclusion zones for datasets in S
              data = list of S data sets, e.g.['Smax','SE','SH','SARwb']
             power = list of scaled power levels for data, e.g. [200,200,100]
+               bg = background color, selected from COLORS dictionary, e.g. 'white'
+               fg = foreground color, selected from COLORS dictionary, e.g. 'black'
             color = list of colours for exclusion zones for data, e.g. ['red','blue','crimson']
             alpha = opacity of the exclusion zone [0 to 1]
           setting = list of settings for data, e.g. ['pub','occ']
@@ -995,6 +1091,7 @@ class RFc:
              hman = height of man figure
            xyzman = [x,y,z] coords of centre of man
           antenna = function for dispay of antenna
+            antdz = displacement of second antenna in vertical direction. Enter None to not display
           figsize = tuple of width and height f figure in pixels, e.g. (1200,900)
         '''
 
@@ -1016,7 +1113,7 @@ class RFc:
         standard = makeIterable(standard,'standard')
 
         # assertion tests
-        Scols = self.S.columns[5:].tolist()  # i.e. all columns except the x y z r phi coordinates
+        Scols = [col for col in self.S.columns if col not in ('x','y','z','r','phi')]  # i.e. all columns except the x y z r phi coordinates
         for d in data:
             assert d in Scols, f"data ({d}) must be one of {Scols}"
         for c in color:
@@ -1084,8 +1181,11 @@ class RFc:
         extent = ScbAll.apply([min,max]).T.values.flatten().round(1).tolist()
 
         # create the Mayavi figure
-        fig = mlab.figure(1, size=figsize, bgcolor=bgc, fgcolor=fgc)
-        mlab.clf()
+        try:
+            fig = mlab.figure(1, size=figsize, bgcolor=bgc, fgcolor=fgc)
+            mlab.clf()
+        except:
+            raise Exception("Could not create mlab figure")
 
         # draw the iso-surfaces
         titles = [] if title == '' else [title + '\n']
@@ -1100,9 +1200,12 @@ class RFc:
                 S = S[:,:,nc:]
             S = np.nan_to_num(S, nan=0.0)  # replace nans in S with zeros
             if S.min() < con < S.max():    # check that con lies within range of values in S field
-                src = mlab.pipeline.scalar_field(X, Y, Z, S, name=dat)
-                mlab.pipeline.iso_surface(src, contours=[con, ], opacity=a,
-                                          color=COLORS[col])
+                try:
+                    src = mlab.pipeline.scalar_field(X, Y, Z, S, name=dat)
+                    mlab.pipeline.iso_surface(src, contours=[con, ], opacity=a,
+                                              color=COLORS[col])
+                except:
+                    raise Exception(f"Could not draw iso-surface for {dat}")
 
         # draw the axes
         ax = mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
@@ -1118,6 +1221,10 @@ class RFc:
 
         # draw the antenna
         antenna('blue')
+        
+        # draw second elevated antenna
+        if antdz != None:
+            antenna('blue',z0=antdz)
         
         # draw the man figure
         if hman != None:
