@@ -1072,7 +1072,7 @@ class RFc:
                       alpha=[0.5]*8, setting=['public']*8, standard=['RPS-S1']*8, 
                       title='', axv=[True,False,False], ycut=None, zcut=None,
                       hman=None, xyzman=[-1.5,0,0], 
-                      antenna=panelAntenna, antdz=None,
+                      antenna=panelAntenna, antdz=None, gridpoints=False,
                       figsize=(1200,900)):
         '''
         Draw Mayavi figures of exclusion zones for datasets in S
@@ -1092,6 +1092,7 @@ class RFc:
            xyzman = [x,y,z] coords of centre of man
           antenna = function for dispay of antenna
             antdz = displacement of second antenna in vertical direction. Enter None to not display
+       gridpoints = toggle for displaying gridpoints
           figsize = tuple of width and height f figure in pixels, e.g. (1200,900)
         '''
 
@@ -1179,6 +1180,7 @@ class RFc:
             # ScbAll = ScbAll.append(Scb)
             ScbAll = pd.concat([ScbAll, Scb])
         extent = ScbAll.apply([min,max]).T.values.flatten().round(1).tolist()
+        print(extent)
 
         # create the Mayavi figure
         try:
@@ -1207,9 +1209,24 @@ class RFc:
                 except:
                     raise Exception(f"Could not draw iso-surface for {dat}")
 
+        # display gridpoints
+        if gridpoints == True:
+            pointcolor = COLORS['blue']
+            opacity = 0.3
+            scale_factor = 0.02
+            zmax = self.S.z.max()
+            zmin = self.S.z.min()
+            avglength = 1.6
+            mask = (self.S.z < zmax-avglength/2) & (self.S.z > zmin+avglength/2)
+            Sp = self.S[mask]
+            extent = Sp[['x','y','z']].apply([min,max]).T.values.flatten().round(1).tolist()
+            mlab.points3d(Sp.x.values,Sp.y.values,Sp.z.values,
+                          scale_factor=scale_factor,color=pointcolor,
+                          opacity=opacity)
+
         # draw the axes
         ax = mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
-                  z_axis_visibility=axv[2], line_width=1, extent=extent)
+                  z_axis_visibility=axv[2], line_width=1, extent=extent)            
         ax.label_text_property.color = fgc
         ax.title_text_property.color = fgc
         ax.axes.label_format = '%g'
@@ -1230,7 +1247,8 @@ class RFc:
         if hman != None:
             xc, yc, zc = xyzman
             mlabman(hman, xc, yc, zc)
-
+            
+        # Set up the mayavi view
         mlab.view(90, -90)  # xz plane (azimuth=90°, elevation=90°)
         fig.scene.parallel_projection = True
         mlab.show()
