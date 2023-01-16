@@ -764,7 +764,8 @@ class RFc:
         if errtol == None: errtol = self.errtol
         if spatavgL == None: spatavgL = self.spatavgL
         if power == None: power = self.power
-        Slim = Slimit(self.freq, setting, standard) * self.power / power
+        Slim = Slimit(self.freq, setting, standard)
+        Slim_adjusted = Slim * self.power / power
         
         # functions for filter masks
         def fnAll():
@@ -784,9 +785,9 @@ class RFc:
             
         def fnSpatavg(spatavgL):
             x0, x1, y0, y1, z0, z1 = self.antboxsize(0)
-            mask = (S.x < x0) | (S.x > x1) | \
-                   (S.y < y0) | (S.y > y1) | \
-                   (S.z <= z0-spatavgL/2) | (S.z >= z1+spatavgL/2)
+            zmin, zmax, dz = self.grid['z']
+            mask = ((S.x < x0) | (S.x > x1) | (S.y < y0) | (S.y > y1)) & \
+                   (S.z >= zmin+spatavgL/2) & (S.z <= zmax-spatavgL/2)
             return mask
             
         def fnSpatavgOutant(offset,spatavgL):
@@ -842,11 +843,11 @@ class RFc:
             mask = fnSpatavgOutant(offset, spatavgL)
             name = f'valid points for {spatavgL}m spatial average window outside {offset}m offsetted antenna box'
         elif m == 'cb':
-            mask = fnCb(Slim, data, offset, errtol)
-            name = f'{offset}m antenna offset points within {errtol * 100:g}% of {standard} {setting} limit ({Slim} W/m²) for {data} data'
+            mask = fnCb(Slim_adjusted, data, offset, errtol)
+            name = f'{offset}m antenna offset points within {errtol * 100:g}% of {standard} {setting} limit ({Slim} W/m²) for {data} data and {power}W radiated power'
         elif m == 'icb':
-            mask = fnIcb(Slim, data, offset)
-            name = f'{offset}m antenna offset points inside {standard} {setting} compliance boundary ({Slim} W/m²) for {data} data'
+            mask = fnIcb(Slim_adjusted, data, offset)
+            name = f'{offset}m antenna offset points inside {standard} {setting} compliance boundary ({Slim} W/m²) for {data} data and {power}W radiated power'
         else:
             mask = fnMeval(m, offset)
             name = 'points outside antenna box (offset = {})\nwhere {}'.format(offset, m)
