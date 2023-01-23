@@ -633,9 +633,26 @@ def mlabman(h, xc, yc, zc):
 
 class Filter():
     '''This is just an object package for a filter mask and its name'''
-    def __init__(self, mask, name):
+    def __init__(self, mask, name, m, offset, spatavgL, errtol, power):
         self.mask = mask
         self.name = name
+        self.m = m
+        self.offset = offset
+        self.spatavgL = spatavgL
+        self.errtol = errtol
+        self.power = power
+        self.n = mask.sum()
+        
+    def __repr__(self):
+        s = '*Filter object*\n'
+        s += f'              name: {self.name}\n'
+        s += f'No. of mask points: {self.n:,d}\n'
+        s += f'                 m: {self.m}\n'
+        s += f'            offset: {self.offset}\n'
+        s += f'          spatavgL: {self.spatavgL}\n'
+        s += f'            errtol: {self.errtol}\n'
+        s += f'             power: {self.power}\n'
+        return s
 
 class RFc:
     '''Creates an object which facilitates quantification and viewing of RF calculation
@@ -769,18 +786,35 @@ class RFc:
         
         # functions for filter masks
         def fnAll():
+            # All points
             mask = np.repeat(True,len(S))
             return mask
         
         def fnOutant(offset):
+            # Points outside of the offsetted antenna box
             x0, x1, y0, y1, z0, z1 = self.antboxsize(offset)
             mask = (S.x < x0) | (S.x > x1) | \
                    (S.y < y0) | (S.y > y1) | \
                    (S.z < z0) | (S.z > z1)
             return mask
         
-        def fnAnt(offset):
-            mask = ~fnOutant(offset)
+        def fnNearField(offset, spatavgL):
+            # Valid points inside the offsetted antenna box
+            mask1 = fnOutant(offset)
+            mask2 = fnValid(0.001,spatavgL)
+            mask = ~mask1 & mask2
+            return mask
+            
+        def fnValid(offset, spatavgL):
+            # Valid points for the antenna offset and spatial averaging length
+            x0, x1, y0, y1, z0, z1 = self.antboxsize(0)
+            zmin, zmax, dz = self.grid['z']
+            zoffset = max(offset, spatavgL/2)
+            mask1 = (S.x > x0-offset)  & (S.x < x1+offset) & \
+                    (S.y > y0-offset)  & (S.y < y1+offset) & \
+                    (S.z > z0-zoffset) & (S.z < z1+zoffset)
+            mask2 = (S.z >= zmin+spatavgL/2) & (S.z <= zmax-spatavgL/2)
+            mask = ~mask1 & mask2
             return mask
             
         def fnSpatavg(spatavgL):
@@ -832,10 +866,13 @@ class RFc:
             if offset == 0:
                 name = 'points outside antenna box'
             else:
-                name = f'points outside {offset}m offsetted antenna box'
-        elif m == 'ant':
-            mask = fnAnt(offset)
-            name = f'points inside and on {offset}m offsetted antenna box'
+                name = f'points further than {offset}m from antenna box'
+        elif m == 'near field':
+            mask = fnNearField(offset,spatavgL)
+            name = f'Valid near field points within {offset}m of antenna box'
+        elif m == 'valid':
+            mask = fnValid(offset,spatavgL)
+            name = f'valid points for {offset}m antenna offset and {spatavgL}m spatial average window'
         elif m == 'spatavg':
             mask = fnSpatavg(spatavgL)
             name = f'valid points for {spatavgL}m spatial average window'
@@ -850,9 +887,9 @@ class RFc:
             name = f'{offset}m antenna offset points inside {standard} {setting} compliance boundary ({Slim} W/m²) for {data} data and {power}W radiated power'
         else:
             mask = fnMeval(m, offset)
-            name = 'points outside antenna box (offset = {})\nwhere {}'.format(offset, m)
+            name = f'points outside antenna box (offset = {offset}) where {m}'
 
-        return Filter(mask, name)
+        return Filter(mask, name, m, offset, spatavgL, errtol, power)
 
     def printfilters(self):
         '''Print the number of xyz points in the standard filters'''
@@ -1073,7 +1110,8 @@ class RFc:
                       alpha=[0.5]*8, setting=['public']*8, standard=['RPS-S1']*8, 
                       title='', axv=[True,False,False], ycut=None, zcut=None,
                       hman=None, xyzman=[-1.5,0,0], 
-                      antenna=panelAntenna, antdz=None, gridpoints=False,
+                      antenna=panelAntenna, antdz=None, 
+                      gridpoints=False, gridpoint_filter=None, gridpoint_size=0.02, gridpoint_opacity=0.3,
                       figsize=(1200,900)):
         '''
         Draw Mayavi figures of exclusion zones for datasets in S
@@ -1091,7 +1129,11 @@ class RFc:
              zcut = z value to set cutplane where all points have z > zcut [zstart to zend]
              hman = height of man figure
            xyzman = [x,y,z] coords of centre of man
-          antenna = function for dispay of antenna
+       gridpoints = toggle to display gridpoint. Defau;ti is False to NOT display gridpoints
+ gridpoint_filter = Mask for gridpoints. Default is valid points for 1.6m spatial averaging
+   gridpoint_size = size of gridpoints. Default is 0.02
+gridpoint_opacity = opacity of the gripoints [0 to 1]
+          antenna = function for display of antenna
             antdz = displacement of second antenna in vertical direction. Enter None to not display
        gridpoints = toggle for displaying gridpoints
           figsize = tuple of width and height f figure in pixels, e.g. (1200,900)
@@ -1213,17 +1255,16 @@ class RFc:
         # display gridpoints
         if gridpoints == True:
             pointcolor = COLORS['blue']
-            opacity = 0.3
-            scale_factor = 0.02
-            zmax = self.S.z.max()
-            zmin = self.S.z.min()
-            avglength = 1.6
-            mask = (self.S.z < zmax-avglength/2) & (self.S.z > zmin+avglength/2)
-            Sp = self.S[mask]
+            if gridpoint_filter == None:
+                # create mask for valid 1.6m spatial averaging points
+                gridpoint_filter = self.sf('spatavg', offset=0.001, spatavgL=1.6)
+            Sp = self.S[gridpoint_filter.mask]
+            if ycut != None:
+                Sp = Sp[Sp.y >= ycut]
             extent = Sp[['x','y','z']].apply([min,max]).T.values.flatten().round(1).tolist()
             mlab.points3d(Sp.x.values,Sp.y.values,Sp.z.values,
-                          scale_factor=scale_factor,color=pointcolor,
-                          opacity=opacity)
+                          scale_factor=gridpoint_size,color=pointcolor,
+                          opacity=gridpoint_opacity)
 
         # draw the axes
         ax = mlab.axes(x_axis_visibility=axv[0], y_axis_visibility=axv[1],
