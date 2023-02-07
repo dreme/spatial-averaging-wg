@@ -46,6 +46,7 @@ import numbers
 from collections import namedtuple
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import textwrap as tr
 from mayavi import mlab
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy import interpolate
@@ -1066,7 +1067,7 @@ class RFc:
             unit = 'W/kg'
         else:
             unit = r'W/m$^2$'
-        Sh = self.S.loc[f.mask, data]
+        Sh = self.S.loc[f.mask, data].dropna()
 
         fig, ax = plt.subplots(figsize=(12, 6))
         Sh.hist(bins=bins, ax=ax, range=xrange)
@@ -1077,11 +1078,16 @@ class RFc:
         ax.set_ylabel('counts', fontsize=16)
         CIlow = np.nanpercentile(Sh, (100 - CI) / 2.)
         CIhigh = np.nanpercentile(Sh, 100 - (100 - CI) / 2.)
-        titlestr = '{}% CI is {:.2f} to {:.2f} {} for {}\n[ {:,d} points ]'
-        title = titlestr.format(CI, CIlow, CIhigh, unit, f.name, len(Sh))
+        # titlestr = '{}% CI is {:.2f} to {:.2f} {} for {}\n[ {:,d} points ]'
+        # titlestr = tr.fill(titlestr, 80) + 
+        # title = titlestr.format(CI, CIlow, CIhigh, unit, f.name, len(Sh))
+        title = f'{CI}% CI is {CIlow:.2f} to {CIhigh:.2f} {unit} for {f.name}'
+        title = tr.fill(title, 80)
+        title += f'\n[ {len(Sh):,d} points ]'     
         ax.set_title(title, fontsize=16, color='blue')
         plt.xticks(fontsize=14)
         plt.yticks(fontsize=14)
+        return ax
 
     def __str__(self):
         s = 'Object parameters:\n'
