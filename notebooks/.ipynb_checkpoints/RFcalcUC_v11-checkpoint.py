@@ -550,6 +550,43 @@ def show_grid_points(df, fields=['SARwb'],axv=(True,False,False),hman=None,anten
     fig.scene.parallel_projection = True
     mlab.show()
     
+def antonics(antcolor='orange'):
+    '''Draw radome for antonics 4G microcell antenna
+       antcolor = color of rhte radome'''
+    
+    # parameters
+    ytop  = 0.036    # y coord for top of the radome
+    rcap  = 0.169/2  # radius of radome cap 
+    hcap  = 0.007    # height of radome cap 
+    ybase = 0.006    # y coord for base of radome
+    rbase = 0.1      # radius of radome base
+    yskirt = ytop - hcap  # y coord for top of skirt
+    col = COLORS[antcolor]
+    GREY = (0.3,0.3,0.3)
+
+    # Create r = [0,1], theta [0, 2pi] and z = 0 variables
+    r, theta = np.mgrid[0:1:2j, 0:2*np.pi:41j]
+    z = np.zeros(r.shape)
+
+    # draw radome cap
+    x1 = rcap * r * np.sin(theta)
+    y1 = rcap * r * np.cos(theta)
+    z1 = ytop - hcap * r
+    mlab.mesh(x1, y1, z1, representation='surface', color=col)
+
+    # draw radome base
+    x2 = rbase * r * np.sin(theta)
+    y2 = rbase * r * np.cos(theta)
+    z2 = z + ybase
+    mlab.mesh(x2, y2, z2, representation='surface', color=GREY)
+
+    # draw radome skirt
+    x3 = (rcap + r*(rbase-rcap)) * np.sin(theta)
+    y3 = (rcap + r*(rbase-rcap)) * np.cos(theta)
+    z3 = yskirt - r*(yskirt-ybase) 
+    mlab.mesh(x3, y3, z3, representation='surface', color=col)
+    mlab.show()
+    
 def cylinder(xc,yc,z1,z2,rx,ry,color,n=30,cap1=True,cap2=True):
     '''Draw a capped eliptical cylinder oriented in z direction with Mayavi mlab
        xc = x coord of cylinder centre
