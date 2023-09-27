@@ -239,3 +239,241 @@ def getgrid(df):
     grid = df[['x','y','z']].agg(['min','max',n,max_delta]).T
     grid['n'] = grid.n.astype(int)
     return grid
+
+def dB(x):
+    '''Convert x to dB(x)'''
+    return 10. * np.log10(x)
+
+def use_best_dtype(df, verbose=True):
+    '''This function converts the dtype of each column in the dataframe
+       to the most memory efficient type
+       INPUTS:
+         df = pandas dataframe
+    '''
+    numerics = ["int8", "int16", "int32", "int64", "float16", "float32", "float64"]
+    start_mem = df.memory_usage().sum() / 1024 ** 2
+    for col in df.columns:
+        col_type = df[col].dtypes
+        if col_type in numerics:
+            c_min = df[col].min()
+            c_max = df[col].max()
+            if str(col_type)[:3] == "int":
+                if c_min > np.iinfo(np.int8).min and c_max < np.iinfo(np.int8).max:
+                    df[col] = df[col].astype(np.int8)
+                elif c_min > np.iinfo(np.int16).min and c_max < np.iinfo(np.int16).max:
+                    df[col] = df[col].astype(np.int16)
+                elif c_min > np.iinfo(np.int32).min and c_max < np.iinfo(np.int32).max:
+                    df[col] = df[col].astype(np.int32)
+                elif c_min > np.iinfo(np.int64).min and c_max < np.iinfo(np.int64).max:
+                    df[col] = df[col].astype(np.int64)
+            else:
+                if (
+                    c_min > np.finfo(np.float16).min
+                    and c_max < np.finfo(np.float16).max
+                ):
+                    df[col] = df[col].astype(np.float16)
+                elif (
+                    c_min > np.finfo(np.float32).min
+                    and c_max < np.finfo(np.float32).max
+                ):
+                    df[col] = df[col].astype(np.float32)
+                else:
+                    df[col] = df[col].astype(np.float64)
+    end_mem = df.memory_usage().sum() / 1024 ** 2
+    if verbose:
+        print(
+            "Mem. usage decreased to {:.2f} Mb ({:.1f}% reduction)".format(
+                end_mem, 100 * (start_mem - end_mem) / start_mem
+            )
+        )
+    return df
+
+def sf(m, S, trial, antboxsize, setting='pub', data='Smax', offset=0,
+       errtol=0, spatavgL=None, power=None, standard='RPS S-1 WB'):
+    '''creates filter masks for S data columns
+    usage: .sf(m, setting, data, offset, errtol, power)
+          m = string to indicate defined filter mask or boolean expression for filter
+              all -> all points
+              outant -> points outside offsetted antenna box
+              ant -> points inside and on offsetted antenna box (= ~outant)
+              spatavg -> valid points for spatial average window or SAR body length
+              spatavg_outant -> valid spatial averaging points outside offsetted antenna box
+              cb -> points near compliance boundary
+              icb -> points inside compliance boundary
+          S = dataframe containing xyz and S values
+       fMHz = exposure frequency in MHz
+ antboxsize = size of a box encompassing the antenna 
+    setting = the upper or lower tier of the limit (e.g. 'pub', 'uncontrolled', 'occupational')
+       data = S dataset in S (e.g. Sixus, SE, SH, Smax)
+     offset = dimensional offset in metres for enlarging the antenna box or 
+              the additional z direction offset from the antenna box for the nobody volume
+     errtol = error tolerance for selecting points near compliance boundary
+   spatavgL = length (m) of the spatial averaging window 
+      power = adjusted power of antenna (the limit value is scaled by self.power/power)'''
+
+    # Set internal variables
+    if spatavgL == None: spatavgL = 1.6
+    Slim = Slimit(fMHz, setting, standard)
+    Slim_adjusted = Slim * self.power / power
+
+    # functions for filter masks
+    def fnAll():
+        # All points
+        mask = np.repeat(True,len(S))
+        return mask
+
+    def fnOutant(offset):
+        # Points outside of the offsetted antenna box
+        x0, x1, y0, y1, z0, z1 = self.antboxsize(offset)
+        mask = (S.x < x0) | (S.x > x1) | \
+               (S.y < y0) | (S.y > y1) | \
+               (S.z < z0) | (S.z > z1)
+        return mask
+
+    def fnNearField(offset, spatavgL):
+        # Valid points inside the offsetted antenna box
+        mask1 = fnOutant(offset)
+        mask2 = fnValid(0.001,spatavgL)
+        mask = ~mask1 & mask2
+        return mask
+
+    def fnValid(offset, spatavgL):
+        # Valid points for the antenna offset and spatial averaging length
+        x0, x1, y0, y1, z0, z1 = self.antboxsize(0)
+        zmin, zmax, dz = self.grid['z']
+        zoffset = max(offset, spatavgL/2)
+        mask1 = (S.x > x0-offset)  & (S.x < x1+offset) & \
+                (S.y > y0-offset)  & (S.y < y1+offset) & \
+                (S.z > z0-zoffset) & (S.z < z1+zoffset)
+        mask2 = (S.z >= zmin+spatavgL/2) & (S.z <= zmax-spatavgL/2)
+        mask = ~mask1 & mask2
+        return mask
+
+    def fnSpatavg(spatavgL):
+        x0, x1, y0, y1, z0, z1 = self.antboxsize(0)
+        zmin, zmax, dz = self.grid['z']
+        mask = ((S.x < x0) | (S.x > x1) | (S.y < y0) | (S.y > y1)) & \
+               (S.z >= zmin+spatavgL/2) & (S.z <= zmax-spatavgL/2)
+        return mask
+
+    def fnSpatavgOutant(offset,spatavgL):
+        mask1 = fnOutant(offset)
+        mask2 = fnSpatavg(spatavgL)
+        mask = mask1 & mask2
+        return mask
+
+    def fnCb(Slim, data, offset, errtol):
+        mask1 = fnOutant(offset) 
+        mask2 = np.isclose(S[data], Slim, rtol=errtol)
+        mask = mask1 & mask2
+        return mask
+
+    def fnIcb(Slim, data, offset):
+        mask1 = fnOutant(offset) 
+        mask2 = S[data] >= Slim
+        mask = mask1 & mask2
+        return mask
+
+    def fnMeval(m, offset):
+        meval = m
+        for c in S.columns:
+            if c in meval:
+                meval = meval.replace(c, 'S.' + c)
+                print(f'replacing {c} with S.{c} --> {meval}')
+        meval = meval.replace('SmaS.x', 'S.Smax')
+        meval = meval.replace('S.S.', 'S.')
+        meval = meval.replace('SiS.xus', 'S.Sixus')
+        print(f'meval: {meval}')
+        mask1 = fnOutant(offset)
+        mask2 = eval(meval)
+        mask = mask1 & mask2
+        return mask            
+
+    # Select filter
+    if m == 'all':
+        mask = fnAll()
+        name = 'all points'
+    elif m == 'outant':
+        mask = fnOutant(offset)
+        if offset == 0:
+            name = 'points outside antenna box'
+        else:
+            name = f'points further than {offset}m from antenna box'
+    elif m == 'near field':
+        mask = fnNearField(offset,spatavgL)
+        name = f'Valid near field points within {offset}m of antenna box'
+    elif m == 'valid':
+        mask = fnValid(offset,spatavgL)
+        name = f'valid points for {offset}m antenna offset and {spatavgL}m spatial average window'
+    elif m == 'spatavg':
+        mask = fnSpatavg(spatavgL)
+        name = f'valid points for {spatavgL}m spatial average window'
+    elif m == 'spatavg_outant':
+        mask = fnSpatavgOutant(offset, spatavgL)
+        name = f'valid points for {spatavgL}m spatial average window outside {offset}m offsetted antenna box'
+    elif m == 'cb':
+        mask = fnCb(Slim_adjusted, data, offset, errtol)
+        name = f'{offset}m antenna offset points within {errtol * 100:g}% of {standard} {setting} limit ({Slim} W/m²) for {data} data and {power}W radiated power'
+    elif m == 'icb':
+        mask = fnIcb(Slim_adjusted, data, offset)
+        name = f'{offset}m antenna offset points inside {standard} {setting} compliance boundary ({Slim} W/m²) for {data} data and {power}W radiated power'
+    else:
+        mask = fnMeval(m, offset)
+        name = f'points outside antenna box (offset = {offset}) where {m}'
+
+    return Filter(mask, name, m, offset, spatavgL, errtol, power)
+
+def contourplot(df,col,fMHz,levels=None,dB=False,R=False):
+    '''Generate contour plot of df[col] in xz plane
+       Depict the omni antenna in the plot at x=0, z=0
+       INPUTS:
+       df = data dataframe containing x,y,z,Smax,Ssa,SAR data
+       col = data column name in df, e.g. "R1.6m-5        
+       fMHz = frequency of the exposure in MHz (used for scaling antenna)
+       levels = contour levels
+       dB = switch for plotting R: True -> plot dB(R), False -> plot R
+       R = switch for indicating compliance ration data
+    '''
+    
+    # make mgrids for x, z, S, SAR
+    X = make_mgrid(df,'x')
+    Z = make_mgrid(df,'z')
+    C = make_mgrid(df,col)
+    if dB == True: 
+        C = 10. * np.log10(C)    
+    
+    # Create plot title
+    if R == True:
+        title = f"compliance ratio for {col[2:]}"
+        if dB == True:
+            title = "dB " + title
+    else:
+        title = col if dB == False else f"dB({col})"
+    title = title + f" at {fMHz} MHz"
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(8,8))
+
+    # Contour plots for R
+    levels = np.linspace(0,10,11)
+    CS1 = ax.contourf(X, Z, C, levels=levels)
+
+    # Label axes and plot and display grid
+    fig.suptitle(title)
+    ax.set_xlabel("x (m)")
+    ax.set_ylabel("z (m)")
+    ax.set_xlim(left=0)
+    ax.grid(ls='--')
+
+    # Draw omni antenna
+    wl = 300 / fMHz           # wavelength
+    dipole_len = wl / 2       # dipole length
+    dipole_sep = 0.75 * wl    # separation between dipole centres
+    zdcs = [dipole_sep * i for i in [-1.5,-0.5,0.5,1.5]]  # z for dipole centres
+    
+    for zdc in zdcs:
+        zlow =  zdc - dipole_len / 2
+        zhigh = zdc + dipole_len / 2
+        ax.plot([0,0],[zlow,zhigh],'b-',lw=4)
+        ax.plot(0,zdc,'ro')
+        
