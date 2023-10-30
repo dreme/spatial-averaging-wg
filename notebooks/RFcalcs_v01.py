@@ -477,3 +477,26 @@ def contourplot(df,col,fMHz,levels=None,dB=False,R=False):
         ax.plot([0,0],[zlow,zhigh],'b-',lw=4)
         ax.plot(0,zdc,'ro')
         
+def con_vector_S13(l, dl, m):
+    '''Create convolution vector for Simpsons 1/3 rule
+    INPUTS:
+      l = averaging length
+      dl = increment between points
+      m = number of points
+    OUTPUT:
+      c = convolution vector
+      '''
+    n = int(round(l/dl)+1)  # no. of elements in convolution vector
+    n_zeros = int(round((n-m)/(m-1)))  # no. of zeros in gaps between weights
+    wts = [4,2]*100         # a pop list for the weights
+    
+    # Assemble the convolution vector
+    c = np.zeros(n)  # create the initial vector       
+    c[0] = 1
+    c[-1] = 1
+    ix = 0
+    for i in range(m-2):
+        ix += n_zeros + 1
+        c[ix] = wts.pop(0)
+    c = c / sum(c)
+    return c

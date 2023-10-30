@@ -33,6 +33,7 @@ Values for freq, power, grid & antennabox are entered as separate inputs when cr
 + Tidy up sf filter code and add spat_avg_outant option
 + Placed mayavi calls inside try/except blocks
 + Added function for calculating WBA SAR using IEC 62232 formula
++ Set appropriate dtypes (float) for empty ScbAll dataframe prior to concatenation
 """
 __version_info__ = (0, 9)
 __version__ = '.'.join(map(str, __version_info__))
@@ -1258,13 +1259,14 @@ gridpoint_opacity = opacity of the gripoints [0 to 1]
             Z = Z[:,:,nc:]
 
         # Calculate the x,y,z extents of the plot for all exclusion zones
-        ScbAll = pd.DataFrame(columns=['x','y','z'])
+        ScbAll = pd.DataFrame(columns=['x','y','z']).astype(float)
         for dat, con in zip(data,contour):
             print(f'{dat=}, {con=}')
             mask = (self.S[dat] >= con) & (self.S[dat] < 1.1*con)
             Scb = self.S.loc[mask,['x','y','z']]
             # ScbAll = ScbAll.append(Scb)
             ScbAll = pd.concat([ScbAll, Scb])
+            
         extent = ScbAll.apply([min,max]).T.values.flatten().round(1).tolist()
         print(extent)
 
