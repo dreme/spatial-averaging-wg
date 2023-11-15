@@ -15,6 +15,7 @@ __author__ = 'Vitas Anderson'
 import pandas as pd
 import numpy as np
 import math
+from collections.abc import Iterable
 
 # Create dictionary of Mayavi color coordinates
 COLORS = {'blue': (65/255., 105/255., 225/255.),
@@ -71,7 +72,7 @@ def Slimit(freq, setting='pub', standard='RPS S-1 WB'):
     standards = ['RPS3','FCC','ICNIRP 2020 WB','ICNIRP 2020 local',
                  'RPS S-1 WB', 'RPS S-1 local']
     assert standard in standards, f"standard ({standard}) must be in {standards}"
-    assert type(freq) in (int, float), f"freq ({freq}) is not an integer or float"
+    # assert type(freq) in (int, float), f"freq ({freq}) is not an integer or float"
     assert 10 <= freq <= 300_000, f"freq ({freq}) is not between 10 and 300,000 MHz"
 
     if standard == 'RPS3':
@@ -220,6 +221,11 @@ def find_idx(arr, v):
     else:
         return idx
 
+def make_iterable(x):
+    if not isinstance(x, Iterable):
+        x = [x]
+    return x    
+    
 def round_to_1(x):
     '''round x down to one significant digit'''
     return round(x, -int(math.floor(math.log10(x))))
@@ -500,3 +506,58 @@ def con_vector_S13(l, dl, m):
         c[ix] = wts.pop(0)
     c = c / sum(c)
     return c
+
+def sagnd(kind:str, n:int, L:float):
+    '''Calculate z-points and weights for various spatial averaging
+       schemes over ground
+       INPUTS:
+         kind = spatial averaging scheme ('ps','simple', 'S13', 'S38', 'GQR')
+         n = number of spatial averaging points
+         L = spatial averaging length, or height of point for 'ps' case
+       OUTPUTS:
+         z = np array of spatial avg assessment point heights (z=0 at ground level)
+         w = np array of assessment point weights
+    '''
+    kinds = ('ps','simple','S13','S38','GQR')
+    assert kind in kinds, f'kind {kind} must be one of {kinds}'
+    match kind:          
+        case 'ps':
+            # point spatial
+            z = np.array([L])
+            w = np.array([1])
+          
+        case 'simple':
+            # Simple average
+            assert (n >= 2), f"n ({n}) must be >= 2"
+            z = np.linspace(0,L,n)
+            w = np.ones(n) / n
+          
+        case 'GQR':
+            # Gaussian Legendre Quadrature Rule
+            z, w = np.polynomial.legendre.leggauss(n)
+            z = (z + 1) * L/2
+            w = w / 2
+          
+        case 'S13':
+            # Simpsons 1/3 rule
+            assert (n >= 2), f"n ({n}) must be >= 2"
+            assert (n%2 == 1), f"n ({n}) must be odd"
+            z = np.linspace(0,L,n)
+            w = np.ones(n)
+            wts = [4,2]*300  # a pop list for the weights
+            for i in range(n-2):
+                w[i+1] = wts.pop(0)
+            w = w / sum(w)
+          
+        case 'S38':
+            # Simpsons 3/8 Rule
+            assert (n >= 4), f"n ({n}) must be >= 4"
+            assert ((n-1)%3 == 0), f"number of intervals ({n-1}) must be odd"
+            z = np.linspace(0,L,n)
+            w = np.ones(n)
+            wts = [3,3,2]*300  # a pop list for the weights
+            for i in range(n-2):
+                w[i+1] = wts.pop(0)
+            w = w / sum(w)
+    
+    return z, w
